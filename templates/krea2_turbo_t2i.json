@@ -1,0 +1,91 @@
+{
+ "_meta": {
+  "name": "Krea2 Turbo · 文生图（最小图像）",
+  "why_handwritten": [
+   "本机那条官方 Krea2 T2I 工作流用了 subgraph，而 ui2api 转换器不支持子图（会跳过实例），",
+   "转出来几乎是空的。所以这里手写一份最小 API 图 —— 节点名在做 CharacterSheet 时已经全摸清了。",
+   "只用核心节点：UNETLoader / CLIPLoader / VAELoader / CLIPTextEncode /",
+   "EmptySD3LatentImage / KSampler / VAEDecode / SaveImage。"
+  ],
+  "turbo_settings": "工作流注释：Turbo 模型 10 步、cfg 1。cfg=1 时负向提示词实际不参与，留个空分支只是为了让图结构完整。",
+  "verified_on": "待验证"
+ },
+
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "{{unet_name}}",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "{{clip_name}}",
+   "type": "{{clip_type}}",
+   "device": "default"
+  }
+ },
+ "3": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "{{vae_name}}"
+  }
+ },
+
+ "4": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": ["2", 0],
+   "text": "{{prompt}}"
+  }
+ },
+ "7": {
+  "class_type": "CLIPTextEncode",
+  "inputs": {
+   "clip": ["2", 0],
+   "text": "{{negative}}"
+  }
+ },
+
+ "5": {
+  "class_type": "EmptySD3LatentImage",
+  "inputs": {
+   "width": "{{width}}",
+   "height": "{{height}}",
+   "batch_size": 1
+  }
+ },
+
+ "6": {
+  "class_type": "KSampler",
+  "inputs": {
+   "model": ["1", 0],
+   "positive": ["4", 0],
+   "negative": ["7", 0],
+   "latent_image": ["5", 0],
+   "seed": "{{seed}}",
+   "steps": "{{steps}}",
+   "cfg": "{{cfg}}",
+   "sampler_name": "euler",
+   "scheduler": "simple",
+   "denoise": 1
+  }
+ },
+
+ "8": {
+  "class_type": "VAEDecode",
+  "inputs": {
+   "samples": ["6", 0],
+   "vae": ["3", 0]
+  }
+ },
+
+ "9": {
+  "class_type": "SaveImage",
+  "inputs": {
+   "images": ["8", 0],
+   "filename_prefix": "{{prefix}}"
+  }
+ }
+}

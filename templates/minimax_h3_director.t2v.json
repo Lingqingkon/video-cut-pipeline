@@ -1,0 +1,84 @@
+{
+ "_meta": {
+  "name": "MiniMax-H3 导演台 · 文生视频 (t2v)",
+  "interface": "MiniMaxH3Director 一站式节点",
+  "verified_on": "ComfyUI 0.35.0 / AutoDL RTX 5090 / 2026-09-14",
+  "verified_result": "480x864, 24 帧, 24fps, 带 aac 32kHz 立体声音轨，参数按提交值生效",
+  "notes": [
+   "以 _ 开头的键会被生成器剥掉，不提交给 ComfyUI（ComfyUI 会把任意顶层键当节点）。",
+   "用 {{key}} 做占位。整串恰好是一个占位符时保留原类型（数字不会变成字符串）。",
+   "bd_grp_sample 传字符串 '采样设置' 已被验证可接受，不要改成对象。",
+   "timeline_data 空串已被验证可接受；导演台的时间轴编辑器只在 mixed 模式才需要它。",
+   "没有挂 8 步 turbo LoRA —— 实测这条图不带 LoRA 就能出片。要不要加、加了快多少，没测过。",
+   "steps 传下去是否真的生效没验证过（schema 默认 25，你们 spec 写的是 8）。"
+  ]
+ },
+
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "{{unet}}",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "{{clip_name}}",
+   "type": "{{clip_type}}",
+   "device": "default"
+  }
+ },
+ "3": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "{{video_vae}}"
+  }
+ },
+ "4": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "{{audio_vae}}"
+  }
+ },
+
+ "12": {
+  "class_type": "MiniMaxH3Director",
+  "inputs": {
+   "model": ["1", 0],
+   "video_vae": ["3", 0],
+   "audio_vae": ["4", 0],
+   "clip": ["2", 0],
+   "task_type": "{{task_type}}",
+   "global_prompt": "{{prompt}}",
+   "bd_grp_sample": "{{sample_group}}",
+   "cfg": "{{cfg}}",
+   "seed": "{{seed}}",
+   "frame_rate": "{{frame_rate}}",
+   "width": "{{width}}",
+   "height": "{{height}}",
+   "ref_max_size": "{{ref_max_size}}",
+   "total_frames": "{{total_frames}}",
+   "timeline_data": "",
+   "steps": "{{steps}}"
+  }
+ },
+
+ "6": {
+  "class_type": "CreateVideo",
+  "inputs": {
+   "images": ["12", 0],
+   "fps": ["12", 2],
+   "audio": ["12", 1]
+  }
+ },
+ "7": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "video": ["6", 0],
+   "filename_prefix": "{{prefix}}",
+   "format": "auto",
+   "codec": "auto"
+  }
+ }
+}

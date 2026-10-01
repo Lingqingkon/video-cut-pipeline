@@ -1,0 +1,344 @@
+# video-cut-pipeline 配置模板
+#
+# 用法：复制成 config.yaml 放到具体项目目录下（<work_root>/<project-id>/config.yaml）。
+# skill 正文只引用这里的键名，不写死路径。
+#
+# 密钥一律走环境变量或 ~/.dsh/video-cut-pipeline.secrets.yaml，**不要写在这里**。
+
+# ── 剪映 ────────────────────────────────────────────────────────────────
+jianying:
+  # 剪映草稿根目录，build_draft 的发布目标
+  draft_root: "<剪映草稿根目录>"
+  # 草稿名。不填就取 shots.json 的 project 字段。
+  # ⚠️ 草稿是按名字定位并**整目录重建**的，同名会覆盖已有草稿。
+  #    要保留手工草稿就在命令行用 --draft-name 加后缀（如 _v2）。
+  draft_name: ""
+  # 本机实测版本 vs MCP 验证版本。不一致时，动画/滤镜/在线资源改完必须肉眼确认
+  detected_version: "11.4.2.14459"
+  tested_version: "10.0.5.13816"
+
+  canvas:
+    # ⚠️ 当前是 480×864 = 生成侧原生分辨率（5:9），剪映里不做任何缩放。
+    # 这是「暂时先用 480p」的临时决定：先让整条链路跑通，不卡在超分上。
+    # 目标态是 1080×1920（9:16）+ upscale.enabled: true，两个要一起改。
+    # 注意 480×864 是 5:9 不是 9:16，切 1080×1920 时会有 1.25% 比例差。
+    width: 480
+    height: 864
+    fps: 24
+
+  # 轨名和字幕样式。样式这套值是既有工程 manifest_a1.json 上验证过的。
+  # ⚠️ 但那份工程画布是 1080×1920，现在是 480×864，字号会不会跟着画布缩放
+  #    还没验证 —— 生成草稿后必须在剪映里肉眼看一次字幕大小和位置。
+  video_track_name: "主画面"
+  subtitle:
+    track_name: "字幕"
+    style:
+      size: 8
+      align: 1            # 1 = 左对齐
+    border:
+      color: [0, 0, 0]
+      width: 20
+    clip:
+      transform_y: -0.7   # 归一化位置，-1 是底部。字幕压在下三分之一
+
+# ── ffmpeg ──────────────────────────────────────────────────────────────
+ffmpeg:
+  ffmpeg: "<ffmpeg.exe>"
+  ffprobe: "<ffprobe.exe>"
+
+# ── 生成 ────────────────────────────────────────────────────────────────
+generation:
+  # 工作流模板。相对 skill 的 templates/ 目录，也可以给绝对路径。
+  # **图不写死在代码里** —— AutoDL 上是 MiniMaxH3Director、本机是 MiniMaxH3Easy，
+  # 节点名完全不同，写死任何一个换台机器就废。换机器只换模板，不动代码。
+  template: "minimax_h3_director.t2v.json"
+  # 镜头带参考图（人设图）时自动改用这个，走 r2v。生成器按 shots.json 里
+  # 有没有 ref_images 自己选，不用手动切。
+  template_r2v: "minimax_h3_director.r2v.json"
+  task_type: "t2v — 文生视频(Text to Video)"
+  sample_group: "采样设置"        # 导演台的 BDGROUP widget，传字符串即可（已验证）
+  timeout: 5400                   # 单条超时秒数。生视频慢，别设太小
+
+  # 无条件加到每条 prompt 上的抑制词缀。已经写过就不重复加。
+  #
+  # ⚠️ 老实说：**这条实测过一次，没拦住。** 提示词里明确写了"不要出现任何文字、
+  #    字幕或水印"，模型照样把台词烧进了画面。所以它是"让这件事至少每次都做到"，
+  #    不是"已经解决了问题"。真正兜底要靠生成后抽帧检查（见 references/artifacts.md）。
+  #
+  #    之所以还是由生成器无条件附加：漏一次就出一条带双份字幕的片子，
+  #    不能指望第 1 段每次都记得写。
+  prompt_prefix: ""
+  prompt_suffix: >-
+    画面中不出现任何文字、字幕、标题、水印、logo 或图形叠加，纯画面。
+    （no text, no subtitles, no captions, no watermark, no logo,
+    no overlay graphics, clean frame）
+
+  # ComfyUI 里的模型文件名。必须和 /object_info 列出来的**完全一致**，
+  # 写错会在提交时报"值不在可选列表里"。
+  models:
+    # t2v / i2v / fl2v 用这个
+    unet: "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+    # r2v / v2v / rv2v 用这个 —— 插件明确要求换底膜，用错会出问题
+    unet_ref: "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+    clip: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    clip_type: "minimax"
+    video_vae: "minimax_h3_video_vae_fp16.safetensors"
+    audio_vae: "minimax_h3_audio_vae_fp32.safetensors"
+
+  video:
+    width: 480
+    height: 864
+    fps: 24
+    cfg: 1.0
+    # ⚠️ 传下去是否真的生效没验证过。schema 默认 25，既有 spec 写的是 8
+    #    （配 8 步 turbo LoRA）。但 AutoDL 上那条 Director 工作流**没有** LoRA 节点。
+    steps: 8
+    seed_start: 1000              # 逐镜头递增；同角色镜头可以考虑固定同一个 seed
+    frames_mode: "auto"           # auto = 帧数由镜头时长反推（frames = duration × fps）
+
+  # 人设图（人物一致性）。r2v 已经能用，参考图手动给即可（shots.json 的 ref_images）。
+  # **还没做**的是"从角色描述自动产出四视图人设图"这一步：那套工作流在本机
+  # <本机 ComfyUI 目录>（Krea2 + krea2_4panel_hia_1536 LoRA），AutoDL 上没有 krea2 权重。
+  # 所以将来要做混合模式：人设图跑本机，视频生成跑 AutoDL。comfyenv 目前一次只开一个后端。
+  character:
+    sheet_workflow: "CharacterSheet_QuadView"
+    t2i_workflow: "Krea2_BoldFlat_Sunlit_T2I"
+    max_ref_images: 9
+    ref_image_size: "match"
+
+# ── ComfyUI 运行环境 ────────────────────────────────────────────────────
+# 本机还是远端的差异全收在这一节，上层代码不关心后面接的是谁。
+comfyui:
+  mode: "remote"                       # local | remote
+  # local 模式用这个地址直连；remote 模式下 base_url 不生效，走 SSH 隧道
+  base_url: "http://127.0.0.1:8188"
+  local_root: "<本机 ComfyUI 目录>"   # local 模式：ComfyUI 安装目录
+  remote_root: "/root/autodl-tmp/ComfyUI"
+  # remote 模式：盒子内部 ComfyUI 监听的地址端口（--listen 0.0.0.0 --port 6006）
+  remote_listen_host: "127.0.0.1"
+  remote_listen_port: 6006
+  # 本机隧道口。不占用 6006 的话可以改成别的
+  tunnel_local_port: 6006
+
+# ── 远端 SSH ────────────────────────────────────────────────────────────
+# AutoDL 实例每次开机 host/port 都会变，关机后原地址立即失效。
+remote:
+  host: "<your-instance>.seetacloud.com"
+  port: <port>
+  user: "root"
+  key_file: ""                         # 有密钥就填，优先于密码
+  # 密码**不写在这**。按下面两个来源找，都找不到就报错。
+  password_env: "VCP_SSH_PASSWORD"
+  secrets_file: "~/.dsh/video-cut-pipeline.secrets.yaml"
+
+# ── 混剪素材 ────────────────────────────────────────────────────────────
+stock:
+  provider: "auto"                     # auto | pexels | mixkit
+  api_key_env: "PEXELS_API_KEY"        # 密钥放环境变量，不要写这里
+  fetcher_dir: "<stockvid 目录>"
+  python: ""                           # 跑 stockvid 用哪个 python；留空用当前解释器
+  orientation: "portrait"              # 竖屏优先（画布是 5:9）
+  search_limit: 12                     # 每条镜头取回多少候选
+  target_height: 1280                  # 筛候选时按这个高度取"高清"档
+  strict: false                        # true = 只保留元数据可核实的源（关掉 mixkit 的 ? 结果）
+  # 混剪素材一般当 B-roll，旁白压在上面，所以默认丢掉素材自带音轨
+  keep_audio: false
+  timeout: 300
+  download_timeout: 600
+
+# ── 语音对齐 ────────────────────────────────────────────────────────────
+# 模型必须是 CTranslate2 格式（model.bin + config.json + tokenizer.json）。
+# 本机现成可用的：<whisper 模型目录>（small / medium 各一份）。换机器要自备一份。
+#
+# 关键：不是直接强制对齐。先 ASR 识别实际说了什么，再与 shots.text 比对。
+# 模型生成的语音可能念错/念漏，直接强制对齐会把时间戳硬摊到给定文本上，错得看不出来。
+asr:
+  engine: "faster_whisper"
+  model_dir: "<whisper 模型目录>"
+  # 走 GPU。CTranslate2 不认 torch 的 CUDA 库，需要 cublas64_12.dll / cudnn_*64_9.dll；
+  # 系统没装 CUDA toolkit 时由 pip 的 nvidia-cublas-cu12 / nvidia-cudnn-cu12 提供，
+  # 代码会把它们的 bin 目录加进 DLL 搜索路径。装法见 references/install.md。
+  device: "cuda"                       # cuda | cpu
+  compute_type: "float16"              # cuda 用 float16；cpu 用 int8
+  allow_cpu_fallback: true             # GPU 起不来时退回 CPU 并打印原因，而不是直接崩
+  language: "zh"
+  word_timestamps: true                # 逐词时间戳，字幕和重点句触发都靠它
+  vad_filter: true
+  # 中性简体提示词，只为压住 Whisper 的繁体输出。
+  # 绝不要塞入期望台词——那会诱导模型把期望文本"念"回来，听检就失去意义了。
+  initial_prompt: "以下是普通话的句子。"
+  mode: "asr_then_compare"
+  on_mismatch: "report"                # report = 报出来等人确认，不静默继续
+  extract_audio: true                  # 用 ffmpeg 从 clips/*.mp4 抽音轨
+  sample_rate: 16000
+  # 判定用 coverage（期望文本里能在 ASR 输出中按序匹配上的字所占比例），
+  # 低于 (1 - 这个值) 就判为念错。不用整体相似度，因为 ASR 在环境音段会幻觉，
+  # 那些插入的字符会把整体相似度严重拉低，而真正的念错会把 coverage 拉低。
+  mismatch_ratio: 0.15
+
+# ── 音效 ────────────────────────────────────────────────────────────────
+# 只用剪映内置声音效果，不引入外部音效素材。
+sfx:
+  mode: "jianying_effect"
+  vip_available: true                  # 剪映会员可用；场景音 73/85 是 VIP，音色 43/57 是 VIP
+  # 重点句默认挂什么效果（category 取自剪映声音效果面板的三个分页）
+  #   场景音 scene / 音色 tone / 声音成曲 speech_to_song
+  default_categories: ["scene", "tone"]
+  # 注意：效果挂在「音频段」上，所以重点句必须先把音频切成独立段。
+  # 首版不支持音量关键帧，只有整体 volume + fade。
+
+# ── 人设图（四视图）─────────────────────────────────────────────────────
+# 给一张角色图，用 Krea2 的图生图编辑路径产出四视图设定图。产物喂给 r2v 做人物一致性。
+#
+# 工作流是 **ComfyUI 界面格式**，运行时才转成 API 图。所以你可以把它拖进 ComfyUI
+# 图形界面里改（加节点、调参数），存回 skill 的 templates/ 下，流水线直接吃新版本，
+# 不用碰任何代码。转换逻辑见 scripts/vcp/ui2api.py。
+charset:
+  enabled: true
+  workflow: "CharacterSheet_QuadView_krea2.json"
+
+  # 覆盖工作流里存的模型名 —— 工作流里写的可能是过时的旧名字。
+  # 名字必须和 /object_info 里列出的完全一致。
+  unet_name: "krea2_turbo_fp8_scaled.safetensors"
+  clip_name: "qwen3vl_4b_fp8_scaled.safetensors"
+  vae_name: "qwen_image_vae.safetensors"
+
+  # 内联（旁路）掉的节点类型。没有 4panel LoRA 时把 LoraLoaderModelOnly 填这里：
+  # 会把下游对它的引用改指向它的上游，而不是简单删掉（删掉会让下游悬空）。
+  bypass_class_types: ["LoraLoaderModelOnly"]
+
+  # 四视图指令。这是工作流自带那句，改它就能换成人设图的别的要求。
+  instruction: >-
+    Convert the character in the image to a Character Sheet showing a face
+    close-up, front full body, side full body and back full body views
+
+  # 输出尺寸。工作流注释里说 1MP 是甜点，单人编辑才往高了走。
+  width: 1536
+  height: 1024
+  steps: 10
+  cfg: 1.0
+  seed: 0
+  timeout: 1800
+  filename_prefix: "vcp/charset"
+
+# ── 烧字检测 ────────────────────────────────────────────────────────────
+# MiniMax-H3 会把台词渲染成画面内文字（实测 7 条里 2 条中招），而我们的字幕也在下方
+# → 成片底部两套字。**烧进去的删不掉**（它在像素里，不是字幕层）。
+#
+# 为什么不裁边：实测烧字位置不固定（一条在 70% 高度、另一条在 85%），
+# 要裁掉得裁画面 40% 高度，不可接受。所以只能检测出来换 seed 重生成。
+#
+# 阈值在 10 条标注样本（4 正 6 负）上定标：有字 score 0.186~0.216，
+# 无字除一条 0.1244（衬衫领口造成）外都在 0.026 以下。
+# **宁低勿高**：误报代价是多跑一次生成（~90 秒），漏报代价是双份字幕到客户手里。
+textcheck:
+  threshold: 0.14
+  # >0 时，vcp generate 检出可疑就换 seed 重生成，最多重试这么多次。
+  # 不设上限会无休止烧 GPU，所以默认 0（只报不重试）。
+  retry_on_text: 0
+
+# ── 口播实拍素材入库 ────────────────────────────────────────────────────
+# 和混剪（stock）**相反**：
+#   混剪：丢掉音轨（当 B-roll）、时长截到镜头需要的长度
+#   口播：**保留音轨**（人声就是内容本身）、**不截时长**（视频才是时间基准）
+#
+# 所以口播的镜头时长是由"人说了多久"决定的。如果 shots.json 里的 duration
+# 和实拍视频对不上，整条时间轴会错位，而且表现为"字幕整体偏移一点"这种很难反查的问题。
+# 默认会报出来但不自动改；确定要以实拍为准就开 fix_duration 或用 --fix-duration。
+footage:
+  normalize: true        # 缩放到画布尺寸并统一帧率（铺满后居中裁切，不拉伸）
+  fix_duration: false    # true = 自动把 shots.json 的 duration 改成实测值
+
+# ── 重点句（优惠/福利/促单）────────────────────────────────────────────
+# 分工：
+#   判断"哪句是重点"是语义活 → 第 1 段由模型写 keyphrases.json
+#   那句话说在什么时间     → 第 3.5 段从 align/ 的逐字时间戳里查，不猜、不均分
+#
+# keyphrases.json 格式（模型写的，只有文字）：
+#   { "keyphrases": [ { "shot_id": "a1_c2", "text": "当然可以",
+#                       "note": "优惠承诺", "standalone": true } ] }
+#
+# ⚠️ text 必须逐字出现在该镜头的台词里（标点可以不同），否则定位不到时间。
+keyphrase:
+  # 音频段前后各留一点，免得掐头去尾
+  sfx_pad: 0.2
+  # 切出音频段。**必须开** —— effects（场景音/音色/声音成曲）只能挂在音频段上，
+  # 重点句通常在句子中间，不切就只能给整条音轨挂效果。
+  cuts_audio: true
+  sfx_volume: 1.0
+  sfx_track_name: "重点句音效"
+
+  # 默认动画。这几个名字是**实测可用**的：
+  #   冲屏位移 / 卡拉OK   ← 你自己的「字体特效_样张」里用过（VIP 效果，你有会员）
+  #   故障打字机 / 居中打字 / 模糊   ← 既有工程 manifest_v2.json 里用过
+  # category 只能是 text_intro / text_outro / text_loop
+  default_animation:
+    category: "text_intro"
+    name: "冲屏位移"
+    duration: "0.6s"
+
+  # 默认音效。category 只能是 scene（场景音）/ tone（音色）/ speech_to_song（声音成曲），
+  # name 取自剪映声音效果面板。免费档的场景音有：
+  #   8bit、低保真、合成器、回音、扩音器、水下、没电了、环绕音、电音、颤音
+  # VIP 档 73 个，完整清单见剪映的声音效果面板
+  default_sfx:
+    category: "scene"
+    name: "回音"
+
+# ── 超分 ────────────────────────────────────────────────────────────────
+upscale:
+  # 暂时关闭：先按 480p 把整条链路跑通。打开前记得把 jianying.canvas 也切到 1080×1920，
+  # 两个是一对，只改一个会出现「超分了但画布还是 480」或「画布 1080 但素材还是 480」。
+  enabled: false
+  model: "RealESRGAN_x4plus.pth"       # 放在 ComfyUI 的 models/upscale_models/
+  target_width: 1080
+  target_height: 1920
+  method: "lanczos"                    # Real-ESRGAN 出 4x，再缩到目标
+  # center = 按比例放大填满后居中裁切，不做拉伸。
+  # 源是 480x864 = 5:9，画布 1080x1920 = 9:16，差 1.25%，裁切比拉伸正确。
+  crop: "center"
+  timeout: 3600
+
+# ── 去烧字 ──────────────────────────────────────────────────────────────
+# MiniMax-H3 会把台词烧进画面（实测约 25% 的镜头中招），和我们在剪映里加的字幕
+# 叠成两份字，而烧进去的那套**删不掉**（它在像素里）。提示词压制和裁边都已实测无效。
+# 所以生成之后加这一段：用云端 VSR 的 sttn-det 把 mask 区域挖掉重绘。
+#
+# 开关同时控制两件事：本命令跑不跑、第 4 段排轨用不用 clips_clean/。
+# 产物写 clips_clean/<id>.mp4，**不覆盖 clips/**（和超分同一套机制，避免半套状态）。
+#
+# ⚠️ 必须用 sttn-det。sttn-auto 那个模型的输入是 3 通道、没有 mask，指望它自己
+#    "学会"擦字 —— 实测同一块区域文字笔画像素 1589 -> 1589，等于没做。
+desub:
+  enabled: true
+  # 定位方式。**默认 bottom，不要改成 auto。**
+  #   bottom —— 只让 OCR 在下半屏找字（传一个覆盖下半屏的搜索区，精确框仍由 OCR 决定）。
+  #             烧字是字幕，只出现在下半部分。这是默认。
+  #   auto   —— 不给 -c，OCR 扫整帧。**实测会毁画面**：VSR 的 PaddleOCR 把说书人的
+  #             眼睛/鼻梁认成文字，STTN 把那 62 行挖掉重绘，脸被抹平。
+  #             而且复检拦不住 —— 脸被抹平后那条带子更"干净"，score 只会更低。
+  #             实测 5 条坏 3 条（c2/c4/c5），改动集中在 17%~65% 高度的人脸区。
+  #   coords —— 把 textcheck 量出来的"最密带"当 mask 传给 VSR。干净镜头的那条带子
+  #             也会被重绘（那条带子只是"边缘最密"，不一定有字）。
+  locate: "bottom"
+  # 只对 locate=coords 有意义：是否只处理 textcheck 判为可疑的镜头。
+  only_suspect: true
+  # mask 上下各留几像素。留太小会漏掉字的抗锯齿边（复检会报"仍有白色笔画"），
+  # 留太大则多补一点背景。实测 6px 够用。
+  coords_pad: 6
+  mode: "sttn-det"
+  # 生成后必须复检：带子里的白像素必须归零，否则算失败。
+  recheck: true
+  # 复检不过就把产物删掉 —— 留着会被 resolved_clip 选中，等于把坏产物当好产物用。
+  drop_on_fail: true
+  # 云端 VSR 的位置（装法见 references/install.md）
+  remote_root: "/root/autodl-tmp/vsr"
+  repo: "/root/autodl-tmp/vsr/video-subtitle-remover"
+  python: "/root/autodl-tmp/vsr/venv/bin/python"
+  timeout: 1800
+
+# ── 路径 ────────────────────────────────────────────────────────────────
+paths:
+  work_root: "<WORK_ROOT>"
+  # 每个项目一个目录：<work_root>/<project-id>/
+  project_id_pattern: "<客户简称>-<文案号>-<类型>"

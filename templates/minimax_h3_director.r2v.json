@@ -1,0 +1,112 @@
+{
+ "_meta": {
+  "name": "MiniMax-H3 导演台 · 参考主体生视频 (r2v)",
+  "interface": "LoadImage → MiniMaxH3DirectorGroupReferenceToVideo → MiniMaxH3Director",
+  "verified_on": "ComfyUI 0.35.0 / AutoDL RTX 5090 / 2026-09-14",
+  "verified_result": "图形状被接受并出片；COMFY_AUTOGROW_V3 在 API 格式里用点号名传递",
+  "when_to_use": "有人设图的镜头。人物一致性靠参考图，而不是靠把角色描述抄进每一条提示词。",
+  "notes": [
+   "底膜必须换成 ref2va —— 这是插件自己说的：r2v / v2v / rv2v 要用 ref2va，t2v / i2v / fl2v 才用 fl2va。",
+   "task_type 必须是 'r2v — 参考主体生视频(Reference to Video)'，否则 Director 直接报错。",
+   "r2v_groups 和 i2v_groups 不能同时连（插件会抛 'connect either ... not both'）。",
+   "COMFY_AUTOGROW_V3 的传法：把 UI 里的点号名当普通输入键，例如 'ref_images.ref_image_0': ['I1', 0]。",
+   "内容写在 group 的 prompt 上，不是 Director 的 global_prompt —— 外接 group 会覆盖 UI 时间轴。",
+   "duration_sec 同时放在 group 和 total_frames 上，避免两者不一致时不知道该信哪个。",
+   "最多支持 2 张参考图（两个 LoadImage 槽位 I1/I2）。只给 1 张时，生成器给 ref_image_1",
+   "传 DROP，替换阶段会把 I2 节点和指向它的连线一起剪掉 —— 所以一份模板覆盖 1~2 张。",
+   "要 3 张以上就照 I2 的样子加槽位（插件上限是 9 张）。"
+  ]
+ },
+
+ "I1": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "{{ref_image_0}}"
+  }
+ },
+ "I2": {
+  "class_type": "LoadImage",
+  "inputs": {
+   "image": "{{ref_image_1}}"
+  }
+ },
+
+ "30": {
+  "class_type": "MiniMaxH3DirectorGroupReferenceToVideo",
+  "inputs": {
+   "prompt": "{{prompt}}",
+   "duration_sec": "{{duration_sec}}",
+   "ref_images.ref_image_0": ["I1", 0],
+   "ref_images.ref_image_1": ["I2", 0]
+  }
+ },
+
+ "1": {
+  "class_type": "UNETLoader",
+  "inputs": {
+   "unet_name": "{{unet_ref}}",
+   "weight_dtype": "default"
+  }
+ },
+ "2": {
+  "class_type": "CLIPLoader",
+  "inputs": {
+   "clip_name": "{{clip_name}}",
+   "type": "{{clip_type}}",
+   "device": "default"
+  }
+ },
+ "3": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "{{video_vae}}"
+  }
+ },
+ "4": {
+  "class_type": "VAELoader",
+  "inputs": {
+   "vae_name": "{{audio_vae}}"
+  }
+ },
+
+ "12": {
+  "class_type": "MiniMaxH3Director",
+  "inputs": {
+   "model": ["1", 0],
+   "video_vae": ["3", 0],
+   "audio_vae": ["4", 0],
+   "clip": ["2", 0],
+   "task_type": "r2v — 参考主体生视频(Reference to Video)",
+   "global_prompt": "",
+   "bd_grp_sample": "{{sample_group}}",
+   "r2v_groups": ["30", 0],
+   "cfg": "{{cfg}}",
+   "seed": "{{seed}}",
+   "frame_rate": "{{frame_rate}}",
+   "width": "{{width}}",
+   "height": "{{height}}",
+   "ref_max_size": "{{ref_max_size}}",
+   "total_frames": "{{total_frames}}",
+   "timeline_data": "",
+   "steps": "{{steps}}"
+  }
+ },
+
+ "6": {
+  "class_type": "CreateVideo",
+  "inputs": {
+   "images": ["12", 0],
+   "fps": ["12", 2],
+   "audio": ["12", 1]
+  }
+ },
+ "7": {
+  "class_type": "SaveVideo",
+  "inputs": {
+   "video": ["6", 0],
+   "filename_prefix": "{{prefix}}",
+   "format": "auto",
+   "codec": "auto"
+  }
+ }
+}

@@ -1,0 +1,26 @@
+# video-cut-pipeline 脚本层依赖
+#
+# 装法（在流水线 venv 里）：
+#   python -m venv <venv>
+#   <venv>\Scripts\python.exe -m pip install -r requirements.txt
+#
+# CUDA 运行时说明（Windows + NVIDIA 卡走 GPU 时必需）：
+#   faster-whisper 底层是 CTranslate2，它不用 torch 的 CUDA 库，自己去找
+#   cublas64_12.dll 和 cudnn_*64_9.dll。
+#   - 系统装了完整 CUDA toolkit 12 + cuDNN 9 的话，下面的 nvidia-* 可以不装。
+#   - 没装的话就靠这两个 wheel 提供，代码会把它们的 bin 目录加进 DLL 搜索路径。
+#   这样做的意义是：不需要在目标机器上装系统级 CUDA，pip 就能搞定。
+
+faster-whisper>=1.2.1
+PyYAML>=6.0
+# 繁简统一。Whisper 对中文常输出繁体，不转的话比对会把同一句话说成完全不同。
+zhconv>=1.4
+
+# 驱动 ComfyUI 的 HTTP API（超分、将来的生成）
+httpx>=0.27
+# comfyui.mode: remote 时用它连 AutoDL（exec + 端口转发 + SFTP）
+paramiko>=3.4
+
+# Windows + GPU 才需要；CPU 或 Linux 可以注释掉
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
